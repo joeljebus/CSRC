@@ -9,7 +9,8 @@ import {
 import "./NewEndorsementPage.css";
 import { createEndorsement } from "../../../services/endorsementservices";
 import axios from "axios";
-
+import html2canvas from "html2canvas";
+import jsPDF from "jspdf";
 
 
 
@@ -275,14 +276,14 @@ export default function NewEndorsementPage({onNavigate}) {
     overhead: null,
   });
   const [showReport, setShowReport] = useState(false);
-  const [activeFormat, setActiveFormat] = useState("CSRC");
+  //const activeFormat = form.endorsementFormat || "CSRC";
   
   const reportRef = useRef();
   
   const [campuses, setCampuses] = useState([]);
 
   const [departments, setDepartments] = useState([]);
- 
+ //const [, setGeneratedReport] = useState(null);
   const [faculties, setFaculties] = useState([]);
   useEffect(() => {
     fetchCampuses();
@@ -395,33 +396,72 @@ export default function NewEndorsementPage({onNavigate}) {
   
 
   // ── Print / PDF ─────────────────────────────────────────────────────────────
-  const printReport = () => {
-    const content = reportRef.current?.innerHTML;
-    if (!content) return;
-    const win = window.open("", "_blank");
-    win.document.write(`
-      <html>
-        <head>
-          <title>Endorsement — ${form.title || "Report"}</title>
-          <style>
-            body { margin: 0; background: #525659; display: flex; justify-content: center; }
-            @page { size: A4; margin: 0; }
-            @media print {
-              body { background: #fff; display: block; }
-              .a4-container { box-shadow: none !important; margin: 0 !important; width: 100% !important; }
-            }
-          </style>
-        </head>
-        <body>${content}</body>
-      </html>
-    `);
-    win.document.close();
-    win.onload = () => {
-      win.focus();
-      win.print();
-    };
-  };
-  
+const generateReportPdf = async (shouldDownload = false) => {
+  console.log("FUNCTION STARTED");
+  const element = reportRef.current;
+console.log("ELEMENT:");
+console.log(element);
+  if (!element) return;
+  console.log(reportRef.current);
+  console.log(reportRef.current.innerHTML);
+  await new Promise((resolve) => setTimeout(resolve, 500));
+  console.log("BEFORE HTML2CANVAS");
+  const canvas = await html2canvas(element, {
+    scale: 2,
+    useCORS: true,
+    backgroundColor: "#ffffff",
+  });
+console.log("AFTER HTML2CANVAS");
+  const imgData = canvas.toDataURL("image/png");
+console.log("CREATING PDF");
+  const pdf = new jsPDF("p", "mm", "a4");
+
+  const pdfWidth = 210;
+
+  const pdfHeight = 297;
+
+  const imgWidth = pdfWidth;
+
+  const imgHeight = (canvas.height * imgWidth) / canvas.width;
+
+  let heightLeft = imgHeight;
+
+  let position = 0;
+
+  pdf.addImage(imgData, "PNG", 0, position, imgWidth, imgHeight);
+
+  heightLeft -= pdfHeight;
+
+  while (heightLeft > 0) {
+    position = heightLeft - imgHeight;
+
+    pdf.addPage();
+
+    pdf.addImage(imgData, "PNG", 0, position, imgWidth, imgHeight);
+
+    heightLeft -= pdfHeight;
+  }
+
+  // CREATE BLOB FIRST
+  // CREATE PDF BLOB
+  const pdfBlob = pdf.output("blob");
+
+  // CREATE FILE
+  const reportFile = new File(
+    [pdfBlob],
+    `${form.endorsementFormat}-Report.pdf`,
+    {
+      type: "application/pdf",
+    },
+  );
+  // DOWNLOAD AFTER EVERYTHING
+  if (shouldDownload) {
+    pdf.save(`${form.endorsementFormat}-Report.pdf`);
+  }
+  console.log("RETURNING REPORT FILE");
+  console.log(reportFile);
+  return reportFile;
+};;
   const handleSubmit = async () => {
     // REQUIRED FIELD VALIDATION
 
@@ -627,10 +667,55 @@ export default function NewEndorsementPage({onNavigate}) {
         ),
       );
 
+      // GENERATE REPORT FIRST
+      //const reportFile = await generateReportPdf(false);
 
+      // APPEND REPORT
+      
+
+      // THEN CREATE ENDORSEMENT
       const res = await createEndorsement(payload);
 
+      console.log("CREATE RESPONSE:");
       console.log(res.data);
+
+      const endorsementId = res.data.endorsementId;
+
+      console.log("BEFORE PDF GENERATION");
+
+      const generatedPdfFile = await generateReportPdf(false);
+
+      console.log("AFTER PDF GENERATION");
+
+      console.log(generatedPdfFile);
+
+      if (generatedPdfFile) {
+        console.log("SENDING REPORT API");
+
+        const reportPayload = new FormData();
+
+        reportPayload.append("endorsementId", endorsementId);
+
+        reportPayload.append(
+          "report_pdf",
+          generatedPdfFile,
+          generatedPdfFile.name,
+        );
+
+        const reportRes = await axios.post(
+          "http://localhost:5000/api/endorsements/save-report",
+          reportPayload,
+          {
+            headers: {
+              "Content-Type": "multipart/form-data",
+            },
+          },
+        );
+
+        console.log("REPORT RESPONSE:");
+
+        console.log(reportRes.data);
+      }
 
       alert("Endorsement submitted successfully");
     } catch (err) {
@@ -639,7 +724,33 @@ export default function NewEndorsementPage({onNavigate}) {
       alert("Submission failed");
     }
   };
-  const reportForm = { ...form, coPIs, extInvs, calculatedTotal: grandTotal };
+  const reportForm = {
+    ...form,
+
+    // PI DETAILS FROM PROFILE
+    piName: profile?.staff_name || "",
+
+    piDesignation: profile?.designation || "",
+
+    piDept: profile?.department || "",
+
+    piCampus: profile?.campus || "",
+
+    yearsService: profile?.superannuation_date
+      ? (
+          new Date(profile.superannuation_date).getFullYear() -
+          new Date().getFullYear()
+        ).toString()
+      : "",
+
+    // CO-PI + EXTERNALS
+    coPIs,
+
+    extInvs,
+
+    // FINANCIALS
+    calculatedTotal: grandTotal,
+  };
 
   const formatComponents = {
     CSRC: <CSRCReport form={reportForm} />,
@@ -663,8 +774,19 @@ export default function NewEndorsementPage({onNavigate}) {
  
   return (
     <div className={`ep-page ${mounted ? "ep-loaded" : ""}`}>
-      <div className="ep-report-wrap" ref={reportRef}>
-        {formatComponents[activeFormat]}
+      <div
+        style={{
+          position: "fixed",
+          left: "-99999px",
+          top: 0,
+          width: "210mm",
+          background: "#fff",
+          zIndex: -1,
+        }}
+      >
+        <div ref={reportRef} className="actual-report-container">
+          {formatComponents[form.endorsementFormat]}
+        </div>
       </div>
       <div className="ep-container">
         {/* ── Top Navigation / Back Button ── */}
@@ -996,6 +1118,7 @@ export default function NewEndorsementPage({onNavigate}) {
                 value={form.endorsementFormat}
                 onChange={(e) => setField("endorsementFormat", e.target.value)}
               >
+                <option value="">-- Select Format --</option>
                 {ENDORSEMENT_FORMATS.map((f) => (
                   <option key={f}>{f}</option>
                 ))}
@@ -1332,9 +1455,8 @@ export default function NewEndorsementPage({onNavigate}) {
 
           <button
             className="ep-btn-generate ep-glow-effect"
-            onClick={() => {
-              setShowReport(true);
-            }}
+            disabled={!form.endorsementFormat}
+            onClick={() => setShowReport(true)}
           >
             <span>Generate Official Report</span>
 
@@ -1366,7 +1488,9 @@ export default function NewEndorsementPage({onNavigate}) {
         >
           <div className="ep-modal">
             <div className="ep-modal-header">
-              <h2 className="ep-modal-title">Endorsement Preview</h2>
+              <h2 className="ep-modal-title">
+                {form.endorsementFormat} Endorsement Preview
+              </h2>
               <button
                 className="ep-btn-close"
                 onClick={() => setShowReport(false)}
@@ -1376,18 +1500,10 @@ export default function NewEndorsementPage({onNavigate}) {
             </div>
 
             <div className="ep-format-bar">
-              <div className="ep-format-tabs">
-                {ENDORSEMENT_FORMATS.map((fmt) => (
-                  <button
-                    key={fmt}
-                    className={`ep-format-tab ${activeFormat === fmt ? "active" : ""}`}
-                    onClick={() => setActiveFormat(fmt)}
-                  >
-                    {fmt}
-                  </button>
-                ))}
-              </div>
-              <button className="ep-btn-print" onClick={printReport}>
+              <button
+                className="ep-btn-print"
+                onClick={() => generateReportPdf(true)}
+              >
                 <svg
                   width="18"
                   height="18"
@@ -1406,8 +1522,10 @@ export default function NewEndorsementPage({onNavigate}) {
               </button>
             </div>
 
-            <div className="ep-report-wrap" ref={reportRef}>
-              {formatComponents[activeFormat]}
+            <div className="ep-report-wrap">
+              <div ref={reportRef} className="actual-report-container">
+                {formatComponents[form.endorsementFormat]}
+              </div>
             </div>
           </div>
         </div>
