@@ -1,9 +1,9 @@
 const express = require("express");
 
 const router = express.Router();
+const endorsementUpload = require("../middleware/endorsementUpload");
 
-const endorsementFilesUpload = require("../middleware/reportUpload");
-
+const { saveGeneratedReport } = require("../controllers/reportPdfController");
 const {
   getEndorsements,
 
@@ -19,34 +19,27 @@ router.get(
 router.post(
   "/create",
 
-  endorsementFilesUpload.fields([
+  endorsementUpload.fields([
     {
       name: "proposal_copy",
       maxCount: 1,
     },
-
     {
       name: "signed_writeup",
       maxCount: 1,
     },
-
     {
       name: "signed_budget",
       maxCount: 1,
     },
-
     {
       name: "endorsement_format_file",
-
       maxCount: 1,
     },
-
     {
       name: "overhead_exemption_file",
-
       maxCount: 1,
     },
-
     {
       name: "report_pdf",
       maxCount: 1,
@@ -55,5 +48,16 @@ router.post(
 
   createEndorsement,
 );
+router.post(
+  "/save-report",
 
+  endorsementUpload.fields([
+    {
+      name: "report_pdf",
+      maxCount: 1,
+    },
+  ]),
+
+  saveGeneratedReport,
+);
 module.exports = router;
