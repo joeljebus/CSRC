@@ -46,82 +46,87 @@ ORDER BY id DESC
     });
   }
 };
-const mergePDFs = async (
-  files,
+const mergePDFs = async (files, outputPath) => {
+  console.log("FILES RECEIVED:");
+  console.log(files);
 
-  outputPath,
-) => {
   const mergedPdf = await PDFDocument.create();
 
+  let totalPages = 0;
+
   for (const filePath of files) {
+    console.log("CHECKING:");
+    console.log(filePath);
+
     if (!filePath || !fs.existsSync(filePath)) {
+      console.log("FILE NOT FOUND:", filePath);
+
       continue;
     }
 
-    // SKIP NON-PDF FILES
+    if (path.extname(filePath).toLowerCase() !== ".pdf") {
+      console.log("NOT PDF:", filePath);
 
-    if (path.extname(filePath) !== ".pdf") {
       continue;
     }
 
-    const pdfBytes = fs.readFileSync(filePath);
+    try {
+      const pdfBytes = fs.readFileSync(filePath);
 
-    const pdf = await PDFDocument.load(pdfBytes);
+      const pdf = await PDFDocument.load(pdfBytes);
 
-    const copiedPages = await mergedPdf.copyPages(
-      pdf,
+      const copiedPages = await mergedPdf.copyPages(pdf, pdf.getPageIndices());
 
-      pdf.getPageIndices(),
-    );
+      copiedPages.forEach((page) => {
+        mergedPdf.addPage(page);
+      });
 
-    copiedPages.forEach((page) => mergedPdf.addPage(page));
+      totalPages += copiedPages.length;
+
+      console.log("PAGES ADDED:", copiedPages.length);
+    } catch (err) {
+      console.log("PDF LOAD FAILED:", filePath);
+
+      console.log(err);
+    }
+  }
+
+  console.log("TOTAL PAGES:", totalPages);
+
+  if (totalPages === 0) {
+    console.log("NO VALID PDF PAGES FOUND");
+
+    return;
   }
 
   const mergedBytes = await mergedPdf.save();
 
-  fs.writeFileSync(
-    outputPath,
+  fs.writeFileSync(outputPath, mergedBytes);
 
-    mergedBytes,
-  );
+  console.log("MERGED PDF SAVED:", outputPath);
 };
+
 const createEndorsement = async (req, res) => {
   try {
     const {
       user_id,
-
       funding_agency,
-
       funding_agency_type,
-
       project_type,
-
       scheme,
-
       full_project_title,
-
       reference_number,
-
       non_recurring,
-
       recurring,
-
       overhead_percent,
-
       gst_added,
-
       total_amount,
-
       submission_due_date,
-
       is_pi_regular_faculty,
-
       endorsement_required,
-
       endorsement_format,
-
-     
     } = req.body;
+
     const coPrincipalInvestigators = JSON.parse(
       req.body.coPrincipalInvestigators || "[]",
     );
@@ -129,305 +134,223 @@ const createEndorsement = async (req, res) => {
     const externalInvestigators = JSON.parse(
       req.body.externalInvestigators || "[]",
     );
-    const reportPdf = req.files?.report_pdf?.[0]
-      ? `/uploads/endorsements/${req.files.report_pdf[0].filename}`
-      : null;
-const endorsementCode = `END-${Date.now()}`;
-const appliedDate = new Date();
+
+    const endorsementCode = `END-${Date.now()}`;
+
+    const appliedDate = new Date();
+
+    // ================= SAVE ENDORSEMENT =================
+
     const endorsementResult = await pool.query(
       `
       INSERT INTO endorsements
-(
-  user_id,
-
-  endorsement_id,
-  applied_on,
-
-  funding_agency,
-
-  funding_agency_type,
-
-  project_type,
-  scheme,
-
-  full_project_title,
-
-  reference_number,
-
-  non_recurring,
-
-  recurring,
-
-  overhead_percent,
-
-  gst_added,
-
-  total_amount,
-
-  submission_due_date,
-
-  is_pi_regular_faculty,
-
-  endorsement_required,
-
-  endorsement_format,
-  report_pdf
-)
+      (
+        user_id,
+        endorsement_id,
+        applied_on,
+        funding_agency,
+        funding_agency_type,
+        project_type,
+        scheme,
+        full_project_title,
+        reference_number,
+        non_recurring,
+        recurring,
+        overhead_percent,
+        gst_added,
+        total_amount,
+        submission_due_date,
+        is_pi_regular_faculty,
+        endorsement_required,
+        endorsement_format
+      )
 
       VALUES
-(
-  $1,$2,$3,$4,$5,
-  $6,$7,$8,$9,$10,
-  $11,$12,$13,$14,$15,
-  $16,$17,$18,$19
-)
+      (
+        $1,$2,$3,$4,$5,
+        $6,$7,$8,$9,$10,
+        $11,$12,$13,$14,$15,
+        $16,$17,$18
+      )
 
       RETURNING id
       `,
-
       [
         user_id,
-
         endorsementCode,
-
         appliedDate,
-
         funding_agency,
-
         funding_agency_type,
-
         project_type,
-
         scheme,
-
         full_project_title,
-
         reference_number,
-
         non_recurring || null,
-
         recurring || null,
-
         overhead_percent || null,
-
         gst_added,
-
         total_amount || null,
-
         submission_due_date,
-
         is_pi_regular_faculty,
-
         endorsement_required,
-
         endorsement_format || null,
-        reportPdf,
       ],
     );
+
     const endorsementId = endorsementResult.rows[0].id;
-const files = req.files;
-const proposalCopy = files?.proposal_copy?.[0]
-  ? `/uploads/endorsements/${files.proposal_copy[0].filename}`
-  : null;
 
-const signedWriteup = files?.signed_writeup?.[0]
-  ? `/uploads/endorsements/${files.signed_writeup[0].filename}`
-  : null;
+    const files = req.files;
 
-const signedBudget = files?.signed_budget?.[0]
-  ? `/uploads/endorsements/${files.signed_budget[0].filename}`
-  : null;
+    // ================= DOCUMENT PATHS =================
 
-const endorsementFormatFile = files?.endorsement_format_file?.[0]
-  ? `/uploads/endorsements/${files.endorsement_format_file[0].filename}`
-  : null;
+    const proposalCopy = files?.proposal_copy?.[0]
+      ? `/uploads/endorsements/${files.proposal_copy[0].filename}`
+      : null;
 
-const overheadExemptionFile = files?.overhead_exemption_file?.[0]
-  ? `/uploads/endorsements/${files.overhead_exemption_file[0].filename}`
-  : null;
-  await pool.query(
-    `
-  INSERT INTO endorsement_documents
-  (
-    endorsement_id,
+    const signedWriteup = files?.signed_writeup?.[0]
+      ? `/uploads/endorsements/${files.signed_writeup[0].filename}`
+      : null;
 
-    proposal_copy,
+    const signedBudget = files?.signed_budget?.[0]
+      ? `/uploads/endorsements/${files.signed_budget[0].filename}`
+      : null;
 
-    signed_writeup,
+    const endorsementFormatFile = files?.endorsement_format_file?.[0]
+      ? `/uploads/endorsements/${files.endorsement_format_file[0].filename}`
+      : null;
 
-    signed_budget,
+    const overheadExemptionFile = files?.overhead_exemption_file?.[0]
+      ? `/uploads/endorsements/${files.overhead_exemption_file[0].filename}`
+      : null;
 
-    endorsement_format_file,
+    // ================= SAVE GENERATED REPORT =================
 
-    overhead_exemption_file
-  )
-
-  VALUES ($1,$2,$3,$4,$5,$6)
-  `,
-
-    [
-      endorsementId,
-
-      proposalCopy,
-
-      signedWriteup,
-
-      signedBudget,
-
-      endorsementFormatFile,
-
-      overheadExemptionFile,
-    ],
-  );
     
-const pdfFiles = [
-  proposalCopy ? path.join(__dirname, "..", proposalCopy) : null,
 
-  signedWriteup ? path.join(__dirname, "..", signedWriteup) : null,
+    // ================= SAVE DOCUMENT RECORDS =================
 
-  signedBudget ? path.join(__dirname, "..", signedBudget) : null,
+    await pool.query(
+      `
+      INSERT INTO endorsement_documents
+      (
+        endorsement_id,
+        proposal_copy,
+        signed_writeup,
+        signed_budget,
+        endorsement_format_file,
+        overhead_exemption_file
+      )
 
-  endorsementFormatFile
-    ? path.join(__dirname, "..", endorsementFormatFile)
-    : null,
+      VALUES ($1,$2,$3,$4,$5,$6)
+      `,
+      [
+        endorsementId,
+        proposalCopy,
+        signedWriteup,
+        signedBudget,
+        endorsementFormatFile,
+        overheadExemptionFile,
+      ],
+    );
 
-  overheadExemptionFile
-    ? path.join(__dirname, "..", overheadExemptionFile)
-    : null,
-];
+    // ================= MERGE PDFs =================
 
-const mergedPdfName = `${endorsementCode}.pdf`;
+    // ================= MERGED SUPPORTING DOCS =================
 
-const mergedPdfPath = path.join(
-  __dirname,
+    const mergeInputFiles = [];
 
-  "..",
+    const uploadFiles = [
+      proposalCopy,
+      signedWriteup,
+      signedBudget,
+      endorsementFormatFile,
+      overheadExemptionFile,
+    ];
 
-  "uploads",
+    for (const file of uploadFiles) {
+      if (file && file.toLowerCase().endsWith(".pdf")) {
+mergeInputFiles.push(path.join(__dirname, "..", file.replace(/^\/+/, "")));      }
+    }
+    const mergedPdfName = `${endorsementCode}.pdf`;
 
-  "final-pdfs",
+    const mergedPdfPath = path.join(
+      __dirname,
+      "..",
+      "uploads",
+      "final-pdfs",
+      mergedPdfName,
+    );
+    if (mergeInputFiles.length > 0) {
+      await mergePDFs(mergeInputFiles, mergedPdfPath);
+    }
 
-  mergedPdfName,
-);
+    const mergedPdfDbPath = `/uploads/final-pdfs/${mergedPdfName}`;
 
-await mergePDFs(
-  pdfFiles,
+    await pool.query(
+      `
+      UPDATE endorsements
 
-  mergedPdfPath,
-);
+      SET pdf_file = $1
 
-const mergedPdfDbPath = `/uploads/final-pdfs/${mergedPdfName}`;
-await pool.query(
-  `
-  UPDATE endorsements
+      WHERE id = $2
+      `,
+      [mergedPdfDbPath, endorsementId],
+    );
 
-  SET pdf_file = $1
-
-  WHERE id = $2
-  `,
-
-  [mergedPdfDbPath, endorsementId],
-);
-    // INSERT CO-PI
+    // ================= INSERT CO-PI =================
 
     if (coPrincipalInvestigators && coPrincipalInvestigators.length > 0) {
-      console.log(
-        "COPI:",
-
-        coPrincipalInvestigators,
-      );
-
       for (const copi of coPrincipalInvestigators) {
-        console.log(copi);
-
-        if (!copi.copi_user_id) {
-          continue;
-        }
+        if (!copi.copi_user_id) continue;
 
         await pool.query(
           `
-      INSERT INTO endorsement_copi
-      (
-        endorsement_id,
-        copi_user_id,
-        role
-      )
+          INSERT INTO endorsement_copi
+          (
+            endorsement_id,
+            copi_user_id,
+            role
+          )
 
-      VALUES ($1,$2,$3)
-      `,
-
+          VALUES ($1,$2,$3)
+          `,
           [endorsementId, Number(copi.copi_user_id), copi.role || null],
         );
       }
     }
-    // INSERT EXTERNAL INVESTIGATORS
+
+    // ================= INSERT EXTERNAL INVESTIGATORS =================
 
     if (externalInvestigators && externalInvestigators.length > 0) {
       for (const ext of externalInvestigators) {
-        // SKIP EMPTY ROWS
-
         if (!ext.full_name || ext.full_name.trim() === "") {
           continue;
         }
-console.log(ext);
+
         await pool.query(
           `
-    INSERT INTO endorsement_external_investigators
-    (
-      endorsement_id,
-      full_name,
-      designation,
-      institute
-    )
+          INSERT INTO endorsement_external_investigators
+          (
+            endorsement_id,
+            full_name,
+            designation,
+            institute
+          )
 
-    VALUES ($1,$2,$3,$4)
-    `,
-
+          VALUES ($1,$2,$3,$4)
+          `,
           [
             endorsementId,
-
             ext.full_name,
-
             ext.designation || null,
-
             ext.institute || null,
           ],
         );
       }
     }
-const reportPdfName = `${endorsementCode}-REPORT.pdf`;
 
-const reportPdfPath = path.join(
-  __dirname,
-
-  "..",
-
-  "uploads",
-
-  "final-pdfs",
-
-  reportPdfName,
-);
-
-
-
-const reportPdfDbPath = `/uploads/final-pdfs/${reportPdfName}`;
-
-await pool.query(
-  `
-  UPDATE endorsements
-
-  SET report_pdf = $1
-
-  WHERE id = $2
-  `,
-
-  [reportPdfDbPath, endorsementId],
-);
-console.log(req.files);
     res.status(201).json({
       message: "Endorsement created successfully",
-
       endorsementId,
     });
   } catch (err) {
