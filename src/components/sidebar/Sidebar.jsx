@@ -66,7 +66,7 @@ const navItems = [
     ),
 
     sub: [
-      { id: "proposals", label: "Proposals" },
+      
 
       { id: "sanctioned", label: "Sanctioned Projects" },
 

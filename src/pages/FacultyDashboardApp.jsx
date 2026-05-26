@@ -7,7 +7,7 @@ import ProfilePage        from './profile/ProfilePage';
 import EndorsementsPage   from './endorsements/EndorsementsPage';
 import EndorsementsList   from './endorsements/EndorsementsList';
 import ProjectsPage       from './projects/ProjectsPage';
-import ProposalsList      from './projects/ProposalsList';
+//import ProposalsList      from './projects/ProposalsList';
 import SanctionedList     from './projects/SanctionedList';
 import CTDTPage           from './projects/ctdt/CTDTPage';
 import ProjectStaffPage   from './projects/projectstaff/ProjectStaffPage';
@@ -49,8 +49,7 @@ function FacultyDashboardApp() {
         return <NewFormatReport onNavigate={navigate} />;
       case "projects":
         return <ProjectsPage onNavigate={navigate} />;
-      case "proposals":
-        return <ProposalsList onNavigate={navigate} />;
+      
       case "sanctioned":
         return <SanctionedList onNavigate={navigate} />;
       case "ctdt":
